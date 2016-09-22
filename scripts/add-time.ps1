@@ -1,0 +1,1 @@
+Get-Date -format "MM\/dd\/yyyy HH\:mm\:ss" >> 'C:\login-times.txt'
