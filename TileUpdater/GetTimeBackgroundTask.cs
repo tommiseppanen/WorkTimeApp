@@ -22,9 +22,8 @@ namespace TileUpdater
         {
             var startTime = await GetTodaysLoginTime();
             var lenghtInMinutes = GetWorkDayLenghtInMinutes(startTime);
-            var dayLenght = string.Format("{0:N2}", (lenghtInMinutes / 60.0d));
-            var nextEndTime = startTime.AddMinutes(lenghtInMinutes + (LunchOver() ? Settings.LunchBreakInMinutes : 0));
-            UpdateTile(startTime, nextEndTime, dayLenght);
+            var endTime = startTime.AddMinutes(lenghtInMinutes + (LunchOver() ? Settings.LunchBreakInMinutes : 0));
+            UpdateTile(CreateViewModel(startTime, endTime, lenghtInMinutes));
         }
 
         private static async Task<DateTime> GetTodaysLoginTime()
@@ -47,17 +46,14 @@ namespace TileUpdater
             var lines = await Windows.Storage.FileIO.ReadLinesAsync(file);
             var currentDate = DateTime.Now.Date.ToString("MM/dd/yyyy");
             var time = lines.FirstOrDefault(l => l.Contains(currentDate));
-            if (time == null)
-                return DateTime.Now;
-            return DateTime.Parse(time, CultureInfo.InvariantCulture);
+            return time == null ? DateTime.Now : DateTime.Parse(time, CultureInfo.InvariantCulture);
         }
 
-        private static double GetWorkDayLenghtInMinutes(DateTime startTime)
+        private static int GetWorkDayLenghtInMinutes(DateTime startTime)
         {
             var span = DateTime.Now - startTime;
             var totalMinutes = LunchOver() ? span.TotalMinutes - Settings.LunchBreakInMinutes : span.TotalMinutes;
-            //round to next 15 minutes
-            return Math.Ceiling(totalMinutes / 15.0d) * 15;
+            return (int)Math.Ceiling(totalMinutes / Settings.TimeStepInMinutes) * Settings.TimeStepInMinutes;
         }
 
         private static bool LunchOver()
@@ -65,26 +61,54 @@ namespace TileUpdater
             return DateTime.Now.TimeOfDay > Settings.UsualLunchTime.TimeOfDay;
         }
 
-        private static void UpdateTile(DateTime startTime, DateTime nextEndTime, string dayLenght)
+        private static void UpdateTile(TileViewModel viewModel)
         {
             var updater = TileUpdateManager.CreateTileUpdaterForApplication();
             updater.EnableNotificationQueue(false);
             updater.Clear();
-            updater.Update(new TileNotification(BuildTileXml(startTime, nextEndTime, dayLenght)));
+            updater.Update(new TileNotification(BuildTileXml(viewModel)));
         }
 
-        private static XmlDocument BuildTileXml(DateTime startTime, DateTime nextEndTime, string dayLenght)
+        private static TileViewModel CreateViewModel(DateTime startTime, DateTime endTime, int lenghtInMinutes)
+        {
+            return new TileViewModel()
+            {
+                StartTime = startTime,
+                UsualEndTime = startTime.AddMinutes(Settings.UsualDayLenghtInMinutes+Settings.LunchBreakInMinutes),
+                EndTime = endTime,
+                NextEndTime = endTime.AddMinutes(Settings.TimeStepInMinutes),
+                Hours = FormatToHours(lenghtInMinutes),
+                NextHours = FormatToHours(lenghtInMinutes + Settings.TimeStepInMinutes)
+            };
+        }
+
+        private static string FormatToHours(double minutes)
+        {
+            return string.Format("{0:N2}", (minutes / 60.0d));
+        }
+
+        private static XmlDocument BuildTileXml(TileViewModel viewModel)
         {
             var tileXml = TileUpdateManager.GetTemplateContent(TileTemplateType.TileSquare150x150Text01);
-            SetElementInnerText(tileXml, 0, startTime.ToString("HH:mm"));
-            SetElementInnerText(tileXml, 1, $"{nextEndTime.ToString("HH:mm")} ({dayLenght}h)");
-            SetElementInnerText(tileXml, 2, "Updated " + DateTime.Now.ToString("HH:mm"));
+            SetElementInnerText(tileXml, 0, FormatTitle(viewModel.StartTime, viewModel.UsualEndTime));
+            SetElementInnerText(tileXml, 1, FormatEndTime(viewModel.EndTime, viewModel.Hours));
+            SetElementInnerText(tileXml, 2, FormatEndTime(viewModel.NextEndTime, viewModel.NextHours));
+            SetElementInnerText(tileXml, 3, "Updated " + DateTime.Now.ToString("HH:mm"));
             return tileXml;
         }
-
-        private static void SetElementInnerText(XmlDocument document,int index, string text)
+        private static void SetElementInnerText(XmlDocument document, int index, string text)
         {
             document.GetElementsByTagName(TextElementName)[index].InnerText = text;
+        }
+
+        private static string FormatTitle(DateTime start, DateTime end)
+        {
+            return $"{start.ToString("HH:mm")} - {end.ToString("HH:mm")}";
+        }
+
+        private static string FormatEndTime(DateTime end, string hours)
+        {
+            return $"{end.ToString("HH:mm")} ({hours}h)";
         }
     }
 }
